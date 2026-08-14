@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<title>定位取樣器 · Geolocation Probe</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --ink:#08202B;
+  --panel:#0D2C3A;
+  --panel-2:#123746;
+  --line:#1C4A5E;
+  --chart:#DFE9E7;
+  --dim:#78A0AE;
+  --fix:#4FD6C0;
+  --warn:#E8A33D;
+  --bad:#E4705F;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  --sans:"IBM Plex Sans Condensed","Noto Sans TC",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;padding:0}
+body{
+  background:var(--ink);
+  color:var(--chart);
+  font-family:var(--sans);
+  font-size:16px;
+  line-height:1.5;
+  padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  background-image:
+    linear-gradient(var(--line) 1px,transparent 1px),
+    linear-gradient(90deg,var(--line) 1px,transparent 1px);
+  background-size:48px 48px;
+  background-position:-1px -1px;
+}
+body::before{
+  content:"";position:fixed;inset:0;pointer-events:none;
+  background:radial-gradient(ellipse at 50% 0%,transparent 20%,var(--ink) 78%);
+}
+.wrap{position:relative;max-width:560px;margin:0 auto;padding:20px 16px 56px}
+
+/* ── header ── */
+.masthead{display:flex;align-items:baseline;justify-content:space-between;gap:12px;
+  border-bottom:1px solid var(--line);padding-bottom:10px;margin-bottom:22px}
+.masthead h1{font-size:20px;font-weight:700;letter-spacing:.02em;margin:0}
+.masthead .sub{font-family:var(--mono);font-size:10px;letter-spacing:.18em;
+  text-transform:uppercase;color:var(--dim)}
+
+/* ── status strip ── */
+.strip{display:flex;align-items:center;gap:8px;font-family:var(--mono);
+  font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--dim);margin-bottom:14px}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--dim);flex:none}
+.dot.live{background:var(--fix);animation:pulse 1.8s ease-in-out infinite}
+.dot.err{background:var(--bad)}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}
+@media (prefers-reduced-motion:reduce){.dot.live{animation:none}}
+
+/* ── the ring: signature element ── */
+.ring-wrap{position:relative;display:flex;justify-content:center;margin:4px 0 18px}
+svg.ring{width:100%;max-width:280px;height:auto;display:block}
+.ring .grid{fill:none;stroke:var(--line);stroke-width:1}
+.ring .grid-label{font-family:var(--mono);font-size:7px;fill:var(--dim);letter-spacing:.08em}
+.ring .halo{fill:var(--fix);opacity:.12;transition:r .6s cubic-bezier(.2,.7,.3,1),fill .3s}
+.ring .halo-line{fill:none;stroke:var(--fix);stroke-width:1.5;
+  transition:r .6s cubic-bezier(.2,.7,.3,1),stroke .3s}
+.ring .center{fill:var(--fix);transition:fill .3s}
+.ring.is-warn .halo,.ring.is-warn .center{fill:var(--warn)}
+.ring.is-warn .halo-line{stroke:var(--warn)}
+.ring.is-bad .halo,.ring.is-bad .center{fill:var(--bad)}
+.ring.is-bad .halo-line{stroke:var(--bad)}
+@media (prefers-reduced-motion:reduce){.ring *{transition:none!important}}
+.ring-caption{position:absolute;left:50%;bottom:-2px;transform:translateX(-50%);
+  text-align:center;font-family:var(--mono);white-space:nowrap}
+.ring-caption .acc{font-size:26px;font-weight:600;color:var(--chart);letter-spacing:-.01em}
+.ring-caption .src{display:block;font-size:9.5px;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--dim);margin-top:1px}
+
+/* ── coordinates ── */
+.coords{border-top:1px solid var(--line);border-bottom:1px solid var(--line);
+  padding:16px 0;margin-bottom:18px}
+.coord-row{display:flex;align-items:baseline;gap:12px}
+.coord-row+.coord-row{margin-top:8px}
+.coord-row .tag{font-family:var(--mono);font-size:10px;letter-spacing:.16em;
+  color:var(--dim);width:34px;flex:none}
+.coord-row .val{font-family:var(--mono);font-size:clamp(21px,6.4vw,28px);
+  font-weight:500;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.coord-row .val.idle{color:var(--dim);opacity:.45}
+
+/* ── controls ── */
+.controls{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-bottom:20px}
+button{font-family:var(--sans);font-size:14px;font-weight:600;letter-spacing:.02em;
+  color:var(--chart);background:var(--panel);border:1px solid var(--line);
+  border-radius:2px;padding:13px 10px;cursor:pointer;transition:background .15s,border-color .15s}
+button:hover:not(:disabled){background:var(--panel-2);border-color:var(--fix)}
+button:focus-visible{outline:2px solid var(--fix);outline-offset:2px}
+button:disabled{opacity:.35;cursor:not-allowed}
+button.primary{background:var(--fix);color:var(--ink);border-color:var(--fix);grid-column:1/-1}
+button.primary:hover:not(:disabled){background:#6FE3D0;border-color:#6FE3D0}
+button.tracking{background:var(--warn);color:var(--ink);border-color:var(--warn)}
+button.tracking:hover:not(:disabled){background:#F2B759;border-color:#F2B759}
+
+/* ── telemetry grid ── */
+.telemetry{display:grid;grid-template-columns:repeat(3,1fr);
+  border:1px solid var(--line);margin-bottom:22px}
+.cell{padding:11px 10px;border-right:1px solid var(--line);border-bottom:1px solid var(--line)}
+.cell:nth-child(3n){border-right:none}
+.cell:nth-last-child(-n+3){border-bottom:none}
+.cell .k{font-family:var(--mono);font-size:9px;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--dim);display:block;margin-bottom:3px}
+.cell .v{font-family:var(--mono);font-size:15px;font-weight:500;font-variant-numeric:tabular-nums}
+.cell .v.null{color:var(--dim);opacity:.4}
+
+/* ── log ── */
+.sec-head{display:flex;align-items:baseline;justify-content:space-between;
+  border-bottom:1px solid var(--line);padding-bottom:7px;margin-bottom:2px}
+.sec-head h2{font-size:13px;font-weight:700;letter-spacing:.12em;
+  text-transform:uppercase;margin:0}
+.sec-head .count{font-family:var(--mono);font-size:11px;color:var(--dim)}
+.log{max-height:290px;overflow-y:auto;overscroll-behavior:contain}
+table{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:11.5px;
+  font-variant-numeric:tabular-nums}
+th{text-align:right;font-weight:400;font-size:9px;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--dim);padding:7px 5px;
+  position:sticky;top:0;background:var(--ink);border-bottom:1px solid var(--line)}
+th:first-child,td:first-child{text-align:left;padding-left:0}
+th:last-child,td:last-child{padding-right:0}
+td{text-align:right;padding:6px 5px;border-bottom:1px solid rgba(28,74,94,.4)}
+tr:last-child td{border-bottom:none}
+td.jump{color:var(--warn)}
+td.big-jump{color:var(--bad);font-weight:600}
+.empty{font-family:var(--mono);font-size:12px;color:var(--dim);padding:22px 0;text-align:center}
+
+.exports{display:flex;gap:9px;margin-top:14px}
+.exports button{flex:1;font-size:12.5px;padding:10px 6px}
+
+/* ── notice ── */
+.notice{border-left:2px solid var(--warn);background:rgba(232,163,61,.08);
+  padding:11px 13px;margin-bottom:18px;font-size:13.5px;line-height:1.55}
+.notice.error{border-color:var(--bad);background:rgba(228,112,95,.09)}
+.notice strong{font-weight:700}
+.notice code{font-family:var(--mono);font-size:12px;background:rgba(0,0,0,.28);padding:1px 4px}
+.hidden{display:none!important}
+
+footnote,.footnote{display:block;font-size:12px;line-height:1.6;color:var(--dim);
+  margin-top:26px;padding-top:14px;border-top:1px solid var(--line)}
+.footnote code{font-family:var(--mono);font-size:11px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="masthead">
+    <h1>定位取樣器</h1>
+    <span class="sub">Geolocation Probe</span>
+  </header>
+
+  <div id="httpsWarn" class="notice hidden">
+    <strong>目前不是 HTTPS。</strong>瀏覽器只會在安全來源提供定位權限，請把這頁放到
+    <code>https://</code> 的位置，或用 <code>localhost</code> 開啟。
+  </div>
+
+  <div id="errBox" class="notice error hidden"></div>
+
+  <div class="strip">
+    <span class="dot" id="statusDot"></span>
+    <span id="statusText">待命中 · 尚未取樣</span>
+  </div>
+
+  <div class="ring-wrap">
+    <svg class="ring" id="ring" viewBox="0 0 280 250" role="img"
+         aria-label="定位精度半徑示意圖">
+      <circle class="grid" cx="140" cy="112" r="42"></circle>
+      <circle class="grid" cx="140" cy="112" r="69"></circle>
+      <circle class="grid" cx="140" cy="112" r="93"></circle>
+      <text class="grid-label" x="140" y="73" text-anchor="middle">10 M</text>
+      <text class="grid-label" x="140" y="46" text-anchor="middle">50 M</text>
+      <text class="grid-label" x="140" y="22" text-anchor="middle">200 M</text>
+      <circle class="halo" id="halo" cx="140" cy="112" r="0"></circle>
+      <circle class="halo-line" id="haloLine" cx="140" cy="112" r="0"></circle>
+      <circle class="center" cx="140" cy="112" r="3.5"></circle>
+    </svg>
+    <div class="ring-caption">
+      <span class="acc" id="accVal">—</span>
+      <span class="src" id="accSrc">尚無定位</span>
+    </div>
+  </div>
+
+  <div class="coords">
+    <div class="coord-row">
+      <span class="tag">LAT</span>
+      <span class="val idle" id="lat">--.------</span>
+    </div>
+    <div class="coord-row">
+      <span class="tag">LON</span>
+      <span class="val idle" id="lon">---.------</span>
+    </div>
+  </div>
+
+  <div class="controls">
+    <button class="primary" id="btnOnce">取得目前位置</button>
+    <button id="btnWatch">開始持續追蹤</button>
+    <button id="btnMap" disabled>在 Google 地圖開啟</button>
+    <button id="btnCopy" disabled>複製座標</button>
+    <button id="btnClear" disabled>清空取樣紀錄</button>
+  </div>
+
+  <div class="telemetry">
+    <div class="cell"><span class="k">Altitude</span><span class="v null" id="alt">—</span></div>
+    <div class="cell"><span class="k">Alt Acc</span><span class="v null" id="altAcc">—</span></div>
+    <div class="cell"><span class="k">Speed</span><span class="v null" id="spd">—</span></div>
+    <div class="cell"><span class="k">Heading</span><span class="v null" id="hdg">—</span></div>
+    <div class="cell"><span class="k">最大漂移</span><span class="v null" id="maxDrift">—</span></div>
+    <div class="cell"><span class="k">取樣時間</span><span class="v null" id="ts">—</span></div>
+  </div>
+
+  <div class="sec-head">
+    <h2>取樣紀錄</h2>
+    <span class="count" id="sampleCount">0 筆</span>
+  </div>
+  <div class="log">
+    <table>
+      <thead>
+        <tr>
+          <th>時間</th><th>緯度</th><th>經度</th><th>±m</th><th>Δ前一筆</th><th>Δ首筆</th>
+        </tr>
+      </thead>
+      <tbody id="logBody"></tbody>
+    </table>
+    <div class="empty" id="logEmpty">尚無資料 — 按上面的按鈕開始取樣</div>
+  </div>
+
+  <div class="exports">
+    <button id="btnCsv" disabled>匯出 CSV</button>
+    <button id="btnJson" disabled>匯出 JSON</button>
+  </div>
+
+  <p class="footnote">
+    「來源」欄位是<strong>用精度值反推的猜測</strong>，Geolocation API 不會告訴你實際用了哪種定位方式，
+    請不要當成事實引用。<code>enableHighAccuracy: true</code> 只是請求，系統可以不理會。
+    所有資料只存在這個分頁裡，關掉就沒了，不會送到任何伺服器。
+  </p>
+
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  var $ = function (id) { return document.getElementById(id); };
+  var samples = [];
+  var watchId = null;
+  var last = null;
+
+  if (!window.isSecureContext) $("httpsWarn").classList.remove("hidden");
+
+  /* 精度 → 半徑：對數映射，對應 SVG 裡 10/50/200m 的參考圈 */
+  function radiusFor(m) {
+    var r = 100 * Math.log10(1 + m) / Math.log10(301);
+    return Math.max(4, Math.min(112, r));
+  }
+
+  /* Haversine，回傳公尺 */
+  function distance(a, b) {
+    var R = 6371000, rad = Math.PI / 180;
+    var dLat = (b.lat - a.lat) * rad, dLon = (b.lon - a.lon) * rad;
+    var la1 = a.lat * rad, la2 = b.lat * rad;
+    var h = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+            Math.cos(la1) * Math.cos(la2) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+  }
+
+  function guessSource(m) {
+    if (m <= 20) return "精度佳 · 可能為 GNSS";
+    if (m <= 100) return "中等 · 可能為 Wi-Fi";
+    return "粗略 · 可能為基地台或 IP";
+  }
+
+  function fmtTime(ms) {
+    var d = new Date(ms);
+    var p = function (n, w) { return String(n).padStart(w || 2, "0"); };
+    return p(d.getHours()) + ":" + p(d.getMinutes()) + ":" + p(d.getSeconds()) +
+           "." + p(d.getMilliseconds(), 3);
+  }
+
+  function fmtDist(m) {
+    if (m == null) return "—";
+    if (m < 10) return m.toFixed(1) + " m";
+    if (m < 1000) return Math.round(m) + " m";
+    return (m / 1000).toFixed(2) + " km";
+  }
+
+  function setStatus(text, mode) {
+    $("statusText").textContent = text;
+    $("statusDot").className = "dot" + (mode ? " " + mode : "");
+  }
+
+  function showError(msg) {
+    var box = $("errBox");
+    box.innerHTML = msg;
+    box.classList.remove("hidden");
+  }
+
+  function clearError() { $("errBox").classList.add("hidden"); }
+
+  function onSuccess(pos) {
+    clearError();
+    var c = pos.coords;
+    var s = {
+      lat: c.latitude,
+      lon: c.longitude,
+      acc: c.accuracy,
+      alt: c.altitude,
+      altAcc: c.altitudeAccuracy,
+      spd: c.speed,
+      hdg: c.heading,
+      t: pos.timestamp
+    };
+    s.dPrev = last ? distance(last, s) : null;
+    s.dFirst = samples.length ? distance(samples[0], s) : 0;
+    last = s;
+    samples.push(s);
+    render(s);
+    appendRow(s, samples.length);
+  }
+
+  function render(s) {
+    $("lat").textContent = s.lat.toFixed(6);
+    $("lon").textContent = s.lon.toFixed(6);
+    $("lat").classList.remove("idle");
+    $("lon").classList.remove("idle");
+
+    $("accVal").textContent = "±" + (s.acc < 10 ? s.acc.toFixed(1) : Math.round(s.acc)) + " m";
+    $("accSrc").textContent = guessSource(s.acc);
+
+    var r = radiusFor(s.acc);
+    $("halo").setAttribute("r", r);
+    $("haloLine").setAttribute("r", r);
+    var ring = $("ring");
+    ring.className.baseVal = "ring" + (s.acc > 100 ? " is-bad" : s.acc > 20 ? " is-warn" : "");
+
+    set("alt", s.alt == null ? null : s.alt.toFixed(1) + " m");
+    set("altAcc", s.altAcc == null ? null : "±" + s.altAcc.toFixed(1) + " m");
+    set("spd", s.spd == null ? null : (s.spd * 3.6).toFixed(1) + " km/h");
+    set("hdg", s.hdg == null ? null : Math.round(s.hdg) + "°");
+    set("ts", fmtTime(s.t));
+
+    var max = samples.reduce(function (m, x) {
+      return x.dFirst != null && x.dFirst > m ? x.dFirst : m;
+    }, 0);
+    set("maxDrift", samples.length > 1 ? fmtDist(max) : null);
+
+    $("sampleCount").textContent = samples.length + " 筆";
+    ["btnMap", "btnCopy", "btnClear", "btnCsv", "btnJson"].forEach(function (id) {
+      $(id).disabled = false;
+    });
+  }
+
+  function set(id, v) {
+    var el = $(id);
+    el.textContent = v == null ? "—" : v;
+    el.classList.toggle("null", v == null);
+  }
+
+  function appendRow(s, n) {
+    $("logEmpty").classList.add("hidden");
+    var tr = document.createElement("tr");
+    var cls = s.dPrev == null ? "" :
+              s.dPrev > 50 ? "big-jump" : s.dPrev > 10 ? "jump" : "";
+    tr.innerHTML =
+      "<td>" + fmtTime(s.t) + "</td>" +
+      "<td>" + s.lat.toFixed(6) + "</td>" +
+      "<td>" + s.lon.toFixed(6) + "</td>" +
+      "<td>" + Math.round(s.acc) + "</td>" +
+      '<td class="' + cls + '">' + (s.dPrev == null ? "—" : fmtDist(s.dPrev)) + "</td>" +
+      "<td>" + (n === 1 ? "—" : fmtDist(s.dFirst)) + "</td>";
+    $("logBody").insertBefore(tr, $("logBody").firstChild);
+  }
+
+  function onError(err) {
+    var map = {
+      1: "定位權限被拒絕。請到瀏覽器或系統設定裡重新允許這個網站取用位置。",
+      2: "取不到位置。裝置可能收不到訊號，或定位服務被關閉。",
+      3: "逾時。訊號可能不佳，再試一次或移到窗邊。"
+    };
+    showError("<strong>錯誤碼 " + err.code + "：</strong>" +
+              (map[err.code] || "未知錯誤") +
+              (err.message ? '<br><code>' + err.message + "</code>" : ""));
+    setStatus("錯誤 · 代碼 " + err.code, "err");
+    stopWatch();
+  }
+
+  var opts = { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 };
+
+  $("btnOnce").addEventListener("click", function () {
+    if (!navigator.geolocation) {
+      return showError("<strong>這個瀏覽器不支援 Geolocation API。</strong>");
+    }
+    setStatus("取樣中…", "live");
+    navigator.geolocation.getCurrentPosition(function (p) {
+      onSuccess(p);
+      if (watchId === null) setStatus("已取得單筆定位", "");
+    }, onError, opts);
+  });
+
+  function stopWatch() {
+    if (watchId !== null) {
+      navigator.geolocation.clearWatch(watchId);
+      watchId = null;
+    }
+    $("btnWatch").textContent = "開始持續追蹤";
+    $("btnWatch").classList.remove("tracking");
+  }
+
+  $("btnWatch").addEventListener("click", function () {
+    if (watchId !== null) {
+      stopWatch();
+      setStatus("追蹤已停止 · 共 " + samples.length + " 筆", "");
+      return;
+    }
+    if (!navigator.geolocation) {
+      return showError("<strong>這個瀏覽器不支援 Geolocation API。</strong>");
+    }
+    watchId = navigator.geolocation.watchPosition(function (p) {
+      onSuccess(p);
+      setStatus("持續追蹤中 · 已取樣 " + samples.length + " 筆", "live");
+    }, onError, opts);
+    $("btnWatch").textContent = "停止追蹤";
+    $("btnWatch").classList.add("tracking");
+    setStatus("持續追蹤中…", "live");
+  });
+
+  $("btnMap").addEventListener("click", function () {
+    if (!last) return;
+    window.open("https://www.google.com/maps?q=" + last.lat + "," + last.lon, "_blank");
+  });
+
+  $("btnCopy").addEventListener("click", function () {
+    if (!last) return;
+    var txt = last.lat.toFixed(6) + "," + last.lon.toFixed(6);
+    var done = function () {
+      var b = $("btnCopy"), o = b.textContent;
+      b.textContent = "已複製 " + txt;
+      setTimeout(function () { b.textContent = o; }, 1600);
+    };
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(txt).then(done, function () {
+        showError("複製失敗，座標為 <code>" + txt + "</code>");
+      });
+    } else {
+      showError("此環境無法自動複製，座標為 <code>" + txt + "</code>");
+    }
+  });
+
+  $("btnClear").addEventListener("click", function () {
+    samples = []; last = null;
+    $("logBody").innerHTML = "";
+    $("logEmpty").classList.remove("hidden");
+    $("sampleCount").textContent = "0 筆";
+    $("lat").textContent = "--.------";
+    $("lon").textContent = "---.------";
+    $("lat").classList.add("idle");
+    $("lon").classList.add("idle");
+    $("accVal").textContent = "—";
+    $("accSrc").textContent = "尚無定位";
+    $("halo").setAttribute("r", 0);
+    $("haloLine").setAttribute("r", 0);
+    $("ring").className.baseVal = "ring";
+    ["alt", "altAcc", "spd", "hdg", "maxDrift", "ts"].forEach(function (k) { set(k, null); });
+    ["btnMap", "btnCopy", "btnClear", "btnCsv", "btnJson"].forEach(function (id) {
+      $(id).disabled = true;
+    });
+    clearError();
+    setStatus(watchId !== null ? "持續追蹤中…" : "待命中 · 尚未取樣",
+              watchId !== null ? "live" : "");
+  });
+
+  function download(name, type, content) {
+    var blob = new Blob([content], { type: type + ";charset=utf-8" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url; a.download = name;
+    document.body.appendChild(a); a.click();
+    document.body.removeChild(a);
+    setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+  }
+
+  function stamp() {
+    return new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+  }
+
+  $("btnCsv").addEventListener("click", function () {
+    var head = "timestamp_iso,timestamp_ms,latitude,longitude,accuracy_m," +
+               "altitude_m,altitude_accuracy_m,speed_mps,heading_deg," +
+               "delta_prev_m,delta_first_m\n";
+    var body = samples.map(function (s) {
+      return [
+        new Date(s.t).toISOString(), s.t, s.lat, s.lon, s.acc,
+        s.alt == null ? "" : s.alt,
+        s.altAcc == null ? "" : s.altAcc,
+        s.spd == null ? "" : s.spd,
+        s.hdg == null ? "" : s.hdg,
+        s.dPrev == null ? "" : s.dPrev.toFixed(3),
+        s.dFirst == null ? "" : s.dFirst.toFixed(3)
+      ].join(",");
+    }).join("\n");
+    download("geo-samples-" + stamp() + ".csv", "text/csv", "\ufeff" + head + body);
+  });
+
+  $("btnJson").addEventListener("click", function () {
+    download("geo-samples-" + stamp() + ".json", "application/json",
+             JSON.stringify({ exported: new Date().toISOString(), samples: samples }, null, 2));
+  });
+})();
+</script>
+</body>
+</html>
